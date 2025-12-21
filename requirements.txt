@@ -1,0 +1,5 @@
+PyQt6>=6.5
+requests>=2.31
+mutagen>=1.47
+pyacoustid>=1.2
+Pillow>=10.0
