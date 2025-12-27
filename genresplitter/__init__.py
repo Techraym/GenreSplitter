@@ -1,12 +1,13 @@
 """GenreSplitter package.
 
-This package contains the modular implementation of the portable GenreSplitter app.
-
 Entrypoint:
   - `genresplitter.app.run_app()`
+
+We keep imports light so headless tools/tests can import the package without Qt.
 """
 
-from .app import run_app  # noqa: F401
-
-
 from .meta import APP_VERSION as __version__
+
+def run_app(*args, **kwargs):
+    from .app import run_app as _run_app
+    return _run_app(*args, **kwargs)

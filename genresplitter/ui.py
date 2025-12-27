@@ -1,11 +1,12 @@
 from __future__ import annotations
+from .process_resolver import ProcessGenreResolver  # HOTFIX v2.9.3.15
 
 import os
 import subprocess
 import time
 from typing import Optional
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QObject, pyqtSignal
 from PyQt6.QtGui import QPixmap, QPainter, QFont, QColor, QTextCursor
 from PyQt6.QtWidgets import (
     QApplication,
@@ -51,22 +52,219 @@ from .api_health import (
 
 
 DARK_QSS = """
-QWidget { background-color: #121212; color: #EDEDED; font-size: 13px; }
-QLineEdit, QTextEdit { background-color: #1E1E1E; border: 1px solid #2C2C2C; padding: 6px; color: #EDEDED; }
+QWidget { background-color: #1f2425; color: #EDEDED; font-size: 13px; }
+QLineEdit, QTextEdit { background-color: #1f2425; border: 1px solid #2C2C2C; padding: 6px; color: #EDEDED; }
 QPushButton {
-    background-color: #2A2A2A; border: 1px solid #3A3A3A; padding: 10px 12px;
+    background-color: #1f2425; border: 1px solid #3A3A3A; padding: 10px 12px;
     border-radius: 8px; color: #F2F2F2; font-weight: 600;
 }
-QPushButton:hover { background-color: #343434; }
-QPushButton:pressed { background-color: #222222; }
-QProgressBar { border: 1px solid #2C2C2C; border-radius: 6px; text-align: center; background: #1E1E1E; }
-QProgressBar::chunk { background-color: #4B79FF; border-radius: 6px; }
+QPushButton:hover { background-color: #1f2425; }
+QPushButton:pressed { background-color: #1f2425; }
+QProgressBar { border: 1px solid #2C2C2C; border-radius: 6px; text-align: center; background: #1f2425; }
+QProgressBar::chunk { background-color: #1f2425; border-radius: 6px; }
 QCheckBox { spacing: 10px; font-size: 14px; }
 QCheckBox::indicator { width: 18px; height: 18px; }
 QTabWidget::pane { border: 1px solid #2C2C2C; top: -1px; }
-QTabBar::tab { background: #1E1E1E; border: 1px solid #2C2C2C; padding: 10px 14px; margin-right: 4px; border-top-left-radius: 8px; border-top-right-radius: 8px; }
-QTabBar::tab:selected { background: #2A2A2A; border-color: #4B79FF; }
-QTabBar::tab:hover { background: #242424; }
+QTabBar::tab { background: #1f2425; border: 1px solid #2C2C2C; padding: 10px 14px; margin-right: 4px; border-top-left-radius: 8px; border-top-right-radius: 8px; }
+QTabBar::tab:selected { background: #1f2425; border-color: #4B79FF; }
+QTabBar::tab:hover { background: #1f2425; }
+
+QCheckBox::indicator {
+    width: 18px;
+    height: 18px;
+    border-radius: 4px;
+    border: 2px solid #8A8A8A;
+    background: #1f2425;
+}
+QCheckBox::indicator:hover {
+    border: 2px solid #CFCFCF;
+}
+QCheckBox::indicator:focus {
+    border: 2px solid #FFFFFF;
+}
+QCheckBox::indicator:unchecked {
+    background: #1f2425;
+}
+QCheckBox::indicator:checked {
+    background: #1f2425;          /* bright fill */
+    border: 2px solid #D9E6FF;    /* high-contrast border */
+}
+QCheckBox::indicator:checked:hover {
+    background: #1f2425;
+    border: 2px solid #FFFFFF;
+}
+QCheckBox:disabled {
+    color: #7A7A7A;
+}
+QCheckBox::indicator:disabled {
+    border: 2px solid #555555;
+    background: #1f2425;
+}
+
+/* HOTFIX v2.10.1 COMBOBOX: improve dropdown visibility on dark background */
+QComboBox {
+    background: #1f2425;
+    color: #EAEAEA;
+    border: 1px solid #5A5A5A;
+    border-radius: 6px;
+    padding: 6px 10px;
+    min-height: 26px;
+}
+QComboBox:hover {
+    border: 1px solid #CFCFCF;
+}
+QComboBox:focus {
+    border: 1px solid #FFFFFF;
+}
+QComboBox::drop-down {
+    subcontrol-origin: padding;
+    subcontrol-position: top right;
+    width: 28px;
+    border-left: 1px solid #5A5A5A;
+}
+QComboBox QAbstractItemView {
+    background: #1f2425;
+    color: #EAEAEA;
+    border: 1px solid #5A5A5A;
+    selection-background-color: #1f2425;
+    outline: 0px;
+    padding: 4px;
+}
+
+/* HOTFIX v2.10.2 COMBOBOX: arrow + clear popup border */
+QComboBox {
+    background: #1f2425;
+    color: #EAEAEA;
+    border: 1px solid #5A5A5A;
+    border-radius: 6px;
+    padding: 6px 36px 6px 10px;
+    min-height: 28px;
+}
+QComboBox:hover {
+    border: 1px solid #CFCFCF;
+}
+QComboBox:focus {
+    border: 1px solid #FFFFFF;
+}
+QComboBox::drop-down {
+    subcontrol-origin: padding;
+    subcontrol-position: top right;
+    width: 30px;
+    border-left: 1px solid #6A6A6A;
+    background: #1f2425;
+}
+QComboBox QAbstractItemView {
+    background: #1f2425;
+    color: #EAEAEA;
+    border: 1px solid #CFCFCF;
+    border-radius: 6px;
+    selection-background-color: #1f2425;
+    padding: 6px;
+    outline: 0px;
+}
+
+/* HOTFIX v2.10.4 COMBOBOX: reliable arrow via drop-down background + robust popup border */
+QComboBox {
+    background: #1f2425;
+    color: #EAEAEA;
+    border: 1px solid #5A5A5A;
+    border-radius: 6px;
+    padding: 6px 38px 6px 10px;
+    min-height: 28px;
+}
+QComboBox:hover { border: 1px solid #CFCFCF; }
+QComboBox:focus { border: 1px solid #FFFFFF; }
+
+QComboBox::drop-down {
+    subcontrol-origin: padding;
+    subcontrol-position: top right;
+    width: 34px;
+    border-left: 1px solid #6A6A6A;
+    background: #1f2425;
+    background-image: url({ARROW_ICON_URL});
+    background-position: center;
+    background-repeat: no-repeat;
+}
+QComboBox::down-arrow { image: none; } /* avoid style-dependent arrows */
+
+/* Popup frame (Qt styles differ; cover the common containers) */
+QComboBoxPrivateContainer {
+    background: #1f2425;
+    border: 1px solid #CFCFCF;
+    border-radius: 6px;
+}
+QComboBox QFrame {
+    border: 1px solid #CFCFCF;
+    border-radius: 6px;
+    background: #1f2425;
+}
+QComboBox QListView {
+    border: 1px solid #CFCFCF;
+    border-radius: 6px;
+    background: #1f2425;
+}
+QComboBox QAbstractItemView {
+    background: #1f2425;
+    color: #EAEAEA;
+    border: 0px; /* borders handled by container/frame */
+    selection-background-color: #1f2425;
+    outline: 0px;
+    padding: 6px;
+}
+QAbstractItemView::item { padding: 6px 10px; }
+
+
+
+/* HOTFIX v2.10.5 BRAND_BG: align app background with logo */
+QMainWindow,
+QWidget {
+    background-color: #1f2425;
+}
+QGroupBox {
+    background-color: #1f2425;
+}
+
+/* HOTFIX v2.10.7 CHECKBOX ACCENT: restore brand accent */
+QCheckBox {
+    color: #E8E8E8;
+    spacing: 10px;
+}
+QCheckBox::indicator {
+    width: 18px;
+    height: 18px;
+    border-radius: 4px;
+    border: 2px solid #8A8A8A;
+    background: #1f2425;
+}
+QCheckBox::indicator:hover {
+    border: 2px solid #00b878;
+}
+QCheckBox::indicator:checked {
+    background: #00b878;
+    border: 2px solid #00b878;
+}
+QCheckBox::indicator:checked:hover {
+    background: #00b878;
+    border: 2px solid #7ff0c5;
+}
+QCheckBox::indicator:disabled {
+    border: 2px solid #555555;
+    background: #1f2425;
+}
+
+
+/* HOTFIX v2.10.8 STATUS_BORDER: restore border for status/log window */
+QTextEdit, QPlainTextEdit {
+    background: #1f2425;
+    color: #EAEAEA;
+    border: 1px solid #3a3f40;
+    border-radius: 6px;
+    padding: 6px;
+}
+QTextEdit:focus, QPlainTextEdit:focus {
+    border: 1px solid #CFCFCF;
+}
+
 """
 
 
@@ -100,6 +298,17 @@ def load_logo_pixmap(size: int = 96) -> QPixmap:
     except Exception:
         pass
     return make_mp3_logo()
+
+
+class _UiLogBus(QObject):
+    """Thread-safe log bridge.
+
+    The resolver and worker run on background threads. Qt widgets MUST only be
+    updated on the GUI thread. Emitting a Qt signal is thread-safe and will be
+    delivered via the event loop (queued connection).
+    """
+
+    line = pyqtSignal(str)
 
 
 class SettingsDialog(QDialog):
@@ -144,6 +353,9 @@ class SettingsDialog(QDialog):
 
         self.cb_autoclean = QCheckBox("Autoclean bestandsnamen (aanbevolen)")
         self.cb_id3 = QCheckBox("Gebruik ID3 fallback (laatste redmiddel)")
+        self.cb_fetch_cover = QCheckBox("Haal cover art op (langzamer)")
+        self.cb_fetch_cover.setToolTip("Download cover art (albumhoes) indien beschikbaar. Uitschakelen kan de verwerking merkbaar versnellen.")
+
         self.cb_write_id3 = QCheckBox("Schrijf opgehaalde metadata naar ID3 (ID3v2.4)")
         self.cb_run_report = QCheckBox("Schrijf run-rapport (CSV + JSON) naar doelmap")
         self.cb_run_report.setToolTip("Maakt per run een rapport in de doelmap onder _GenreSplitter_Reports.")
@@ -154,6 +366,7 @@ class SettingsDialog(QDialog):
 
         self.cb_autoclean.setChecked(bool(self._s.get("autoclean", True)))
         self.cb_id3.setChecked(bool(self._s.get("use_id3_fallback", False)))
+        self.cb_fetch_cover.setChecked(bool(self._s.get("fetch_cover_art", True)))
         self.cb_write_id3.setChecked(bool(self._s.get("write_id3_metadata", True)))
         self.cb_run_report.setChecked(bool(self._s.get("write_run_report", True)))
 
@@ -171,15 +384,16 @@ class SettingsDialog(QDialog):
 
         gform.addRow(self.cb_autoclean)
         gform.addRow(self.cb_id3)
+        gform.addRow(self.cb_fetch_cover)
         gform.addRow(self.cb_write_id3)
         gform.addRow(self.cb_run_report)
         gform.addRow(QLabel("Metadata update"), self.cmb_meta_policy)
         gform.addRow(QLabel("Confidence drempel"), self.ed_conf_thr)
 
         # API reliability knobs (shared)
-        self.ed_timeout = QLineEdit(str(self._s.get("api_timeout_seconds", 25)))
-        self.ed_retries = QLineEdit(str(self._s.get("api_retries", 3)))
-        self.ed_backoff = QLineEdit(str(self._s.get("api_backoff_seconds", 1.0)))
+        self.ed_timeout = QLineEdit(str(self._s.get("api_timeout_seconds", 10)))
+        self.ed_retries = QLineEdit(str(self._s.get("api_retries", 1)))
+        self.ed_backoff = QLineEdit(str(self._s.get("api_backoff_seconds", 0.5)))
         self.ed_pause = QLineEdit(str(self._s.get("api_min_pause_seconds", 0.15)))
         self.ed_ab_th = QLineEdit(str(self._s.get("acousticbrainz_threshold", 0.60)))
 
@@ -429,6 +643,7 @@ class SettingsDialog(QDialog):
 
         s["autoclean"] = bool(self.cb_autoclean.isChecked())
         s["use_id3_fallback"] = bool(self.cb_id3.isChecked())
+        s["fetch_cover_art"] = bool(getattr(self, "cb_fetch_cover", QCheckBox()).isChecked())
         s["write_id3_metadata"] = bool(self.cb_write_id3.isChecked())
         s["write_run_report"] = bool(getattr(self, "cb_run_report", QCheckBox()).isChecked())
 
@@ -472,9 +687,9 @@ class SettingsDialog(QDialog):
             try: return float(str(x).strip())
             except: return d
 
-        s["api_timeout_seconds"] = _int(self.ed_timeout.text(), 25)
-        s["api_retries"] = _int(self.ed_retries.text(), 3)
-        s["api_backoff_seconds"] = _float(self.ed_backoff.text(), 1.0)
+        s["api_timeout_seconds"] = _int(self.ed_timeout.text(), 10)
+        s["api_retries"] = _int(self.ed_retries.text(), 1)
+        s["api_backoff_seconds"] = _float(self.ed_backoff.text(), 0.5)
         s["api_min_pause_seconds"] = _float(self.ed_pause.text(), 0.15)
         s["acousticbrainz_threshold"] = _float(self.ed_ab_th.text(), 0.60)
 
@@ -585,8 +800,8 @@ class SplashScreen(QWidget):
         # Keep it self-contained; relies on dark background already used in app
         return """
         QWidget#SplashScreen {
-            background: #111;
-            border: 1px solid #2a2a2a;
+            background: #1f2425;
+            border: 1px solid #3a3f40;
         }
         QLabel#SplashTitle {
             color: #f3f3f3;
@@ -608,8 +823,8 @@ class SplashScreen(QWidget):
         QProgressBar {
             height: 18px;
             border-radius: 9px;
-            border: 1px solid #2a2a2a;
-            background: #1b1b1b;
+            border: 1px solid #3a3f40;
+            background: #1f2425;
         }
         QProgressBar::chunk {
             background: #3d73ff;
@@ -621,12 +836,24 @@ class SplashScreen(QWidget):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+        # v2.10.0: window icon (Logo.ico)
+        try:
+            from PyQt6.QtGui import QIcon
+            _icon_path = os.path.normpath(os.path.join(os.path.dirname(os.path.dirname(__file__)), 'Logo.ico'))
+            if os.path.exists(_icon_path):
+                self.setWindowIcon(QIcon(_icon_path))
+        except Exception:
+            pass
         self.setWindowTitle(f"{APP_NAME} v{APP_VERSION}")
         self.setMinimumSize(820, 540)
 
         self.source_dir: Optional[str] = None
         self.target_dir: Optional[str] = None
         self.worker: Optional[SortWorker] = None
+
+        # Thread-safe log bridge: resolver and worker must never touch widgets directly.
+        self._logbus = _UiLogBus()
+        self._logbus.line.connect(lambda m: self._append_log(m, action=False))
 
         central = QWidget(self)
         self.setCentralWidget(central)
@@ -637,8 +864,10 @@ class MainWindow(QMainWindow):
         logo = QLabel()
         logo.setPixmap(load_logo_pixmap(144))
         header.addWidget(logo)
-        title = QLabel(f"<b>{APP_NAME}</b>  v{APP_VERSION}  ({APP_DATE})")
+        title = QLabel(f"v{APP_VERSION}  ({APP_DATE})")
         title.setTextFormat(Qt.TextFormat.RichText)
+        # v2.10.6 HEADER_ALIGN: align version line with logo text
+        title.setStyleSheet('margin-top: 52px; font-weight: 600;')
         header.addWidget(title)
         header.addStretch(1)
         btn_settings = QPushButton("Settings")
@@ -772,14 +1001,17 @@ class MainWindow(QMainWindow):
             enable_theaudiodb=bool(s.get("enable_theaudiodb", False)),
             enable_itunes=bool(s.get("enable_itunes", True)),
             enable_rateyourmusic=bool(s.get("enable_rateyourmusic", False)),
-            timeout_seconds=int(s.get("api_timeout_seconds", 25)),
-            retries=int(s.get("api_retries", 3)),
-            backoff_seconds=float(s.get("api_backoff_seconds", 1.0)),
+            timeout_seconds=int(s.get("api_timeout_seconds", 10)),
+            retries=int(s.get("api_retries", 1)),
+            backoff_seconds=float(s.get("api_backoff_seconds", 0.5)),
             min_pause_seconds=float(s.get("api_min_pause_seconds", 0.15)),
             acousticbrainz_threshold=float(s.get("acousticbrainz_threshold", 0.60)),
+            fetch_cover_art=bool(s.get("fetch_cover_art", True)),
         )
 
-        resolver = GenreResolver(cfg, self._append_log)
+        # IMPORTANT: GenreResolver will be used from the worker thread. Its log callback must
+        # be thread-safe (signal emission is safe; direct widget updates are not).
+        resolver = ProcessGenreResolver(cfg, self._logbus.line.emit, timeout_sec=int(s.get('api_process_timeout_sec', 45)))
         self.worker = SortWorker(
             source_dir=source,
             target_dir=target,
@@ -799,6 +1031,7 @@ class MainWindow(QMainWindow):
 
         self.btn_start.setEnabled(False)
         self.btn_stop.setEnabled(True)
+        self._append_log("Bezig met verwerken... (eerste bestand kan even duren afhankelijk van API timeouts)", action=True)
         self.worker.start()
 
     def stop_sort(self):

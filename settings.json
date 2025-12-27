@@ -20,5 +20,6 @@
   "theaudiodb_api_key": "",
   "enable_itunes": true,
   "enable_rateyourmusic": false,
-  "rateyourmusic_cookie": ""
+  "rateyourmusic_cookie": "",
+  "api_process_timeout_sec": 45
 }

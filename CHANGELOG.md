@@ -1,3 +1,44 @@
+## 2.9.3 (2025-12-21)
+
+- Fixed: Definitieve hang-proof API resolving via subprocess-isolatie per bestand (DNS/TLS/network hangs kunnen de run niet meer blokkeren).
+- Added: Instelling `api_process_timeout_sec` (default 45s).
+
+## 2.9.2.2 (2025-12-21)
+
+### Fixed
+- UI freeze/hang on Start: resolver logging is now routed via a thread-safe Qt signal (no direct widget updates from worker threads).
+
+## 2.9.2 (2025-12-21)
+
+### Added
+- Nieuw genre: Piratenmuziek (herkenning afgestemd op Nederlandse piratenzenders; tags + routing).
+
+### Fixed
+- Stabiliteit: cover-art downloads begrensd (streaming, max. 5MB) om crashes tijdens metadata-bijwerken te voorkomen.
+
+## 2.9.1 (2025-12-21)
+
+- Final consolidated release.
+- Stable bulk processing: continue-on-error during tag write/move.
+- Multi-format tagging (MP3/FLAC/M4A/WAV/OGG/OPUS/AIFF).
+- iTunes single-winner placement (no copies).
+- Metadata update policies: confidence threshold and cover-only.
+- Debug logging infrastructure retained but disabled by default (enable with GENRESPLITTER_DEBUG_LOG=1).
+
+## [2.9.0-hotfix7] - 2025-12-21
+### Added
+
+## 2.9.0-hotfix8 (2025-12-21)
+
+- Fixed: sorting no longer crashes on move/tag errors; failures are logged and processing continues.
+
+- Persistent logging to `logs/` (file + console) for startup, runtime and worker crashes.
+- Global uncaught exception hook to capture stack traces in the log file.
+
+## [2.9.0-hotfix6] - 2025-12-21
+### Fixed
+- Startup crash: `genresplitter/meta.py` had invalid string quoting; corrected release notes formatting.
+
 ## [2.9.0-hotfix5] - 2025-12-21
 ### Added
 - Metadata update policies:
@@ -172,3 +213,10 @@
 ## 2.2.2
 - Projectstructuur gereorganiseerd
 - Portable-first layout
+
+## v2.10.8
+
+- App icon set to `Logo.ico` (application + main window).
+- hang.log disabled by default.
+- Genre system enhancements (top-level genres, normalization, iTunes safety-net) from the 2.9.3 hotfix series.
+- UI: higher-contrast checkboxes on dark theme.

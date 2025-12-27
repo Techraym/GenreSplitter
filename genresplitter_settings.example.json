@@ -20,5 +20,6 @@
   "api_retries": 3,
   "api_backoff_seconds": 1.0,
   "api_min_pause_seconds": 0.3,
-  "acousticbrainz_threshold": 0.6
+  "acousticbrainz_threshold": 0.6,
+  "api_process_timeout_sec": 45
 }

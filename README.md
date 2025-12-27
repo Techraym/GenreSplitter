@@ -99,3 +99,10 @@ Alle resultaten gaan door `normalize_genre()` zodat output binnen een gesloten s
 
 ## License
 MIT – zie `LICENSE`.
+
+## v2.10.8
+
+- App icon set to `Logo.ico` (application + main window).
+- hang.log disabled by default.
+- Genre system enhancements (top-level genres, normalization, iTunes safety-net) from the 2.9.3 hotfix series.
+- UI: higher-contrast checkboxes on dark theme.

@@ -19,6 +19,9 @@ class ApiConfig:
     rateyourmusic_cookie: str = ""
     acoustid_api_key: str = ""
 
+    # Performance: cover art downloads can be slow
+    fetch_cover_art: bool = True
+
     enable_lastfm: bool = True
     enable_discogs: bool = True
     enable_spotify: bool = True
@@ -186,6 +189,37 @@ class GenreResolver:
             time.sleep(min_pause - dt)
         self._last_call_ts = time.time()
 
+    def _download_bytes_limited(
+        self,
+        url: str,
+        *,
+        timeout: int | None = None,
+        max_bytes: int = 5 * 1024 * 1024,
+        headers: dict | None = None,
+    ) -> bytes:
+        """Download bytes with a hard size cap.
+
+        Rationale: album art endpoints occasionally return unexpected content
+        (HTML errors, redirects, or very large images). Streaming with an
+        explicit cap prevents memory spikes that can crash the application
+        during "metadata update".
+        """
+        tmo = int(timeout or max(15, self.cfg.timeout_seconds))
+        self._pacing()
+        r = self.http.get(url, headers=headers, timeout=tmo, stream=True, allow_redirects=True)
+        if r.status_code != 200:
+            return b""
+
+        buf = bytearray()
+        for chunk in r.iter_content(chunk_size=64 * 1024):
+            if not chunk:
+                continue
+            buf.extend(chunk)
+            if len(buf) > max_bytes:
+                # Abort: too large
+                return b""
+        return bytes(buf)
+
     def _request_json(self, method: str, url: str, *, params: dict | None = None, headers: dict | None = None, data: dict | None = None, timeout: int | None = None) -> tuple[int, Optional[dict], str]:
         timeout = int(timeout or self.cfg.timeout_seconds)
         retries = int(self.cfg.retries)
@@ -286,6 +320,18 @@ class GenreResolver:
                     return self.cache[key]
 
         self.cache[key] = "Unknown"
+
+        # HOTFIX v2.9.3.19 ITUNES_SAFETY_NET:
+        # If we are about to fall back to Other/Unknown because upstream APIs returned niche/unmapped tags,
+        # always try iTunes one last time and use it if it normalizes to a real top-level genre.
+        try:
+            gi = self._from_itunes(artist, title)
+            if gi and gi != "Unknown":
+                gni = normalize_genre(gi)
+                if gni not in ("Unknown", "Other"):
+                    return gi
+        except Exception:
+            pass
         return "Unknown"
 
     def _from_lastfm(self, artist: str, title: str) -> str:
@@ -633,10 +679,9 @@ class GenreResolver:
             art_url = art_url.replace("100x100", "600x600")
         if art_url:
             try:
-                self._pacing()
-                rr = self.http.get(art_url, timeout=max(15, self.cfg.timeout_seconds))
-                if rr.status_code == 200 and rr.content:
-                    out["cover_bytes"] = rr.content
+                data = self._download_bytes_limited(art_url, timeout=max(15, self.cfg.timeout_seconds), max_bytes=5 * 1024 * 1024)
+                if data:
+                    out["cover_bytes"] = data
             except Exception:
                 pass
 
@@ -683,30 +728,195 @@ class GenreResolver:
                 out["release_date"] = date
 
             # Cover art: best-effort via Cover Art Archive if we have a release id
+            # Can be disabled for performance.
+            
             rel_id = (r0.get("id") or "").strip()
-            if rel_id:
+            if rel_id and bool(getattr(self.cfg, 'fetch_cover_art', True)):
                 try:
                     caa_url = f"https://coverartarchive.org/release/{rel_id}/front"
-                    self._pacing()
-                    rr = self.http.get(caa_url, timeout=max(15, self.cfg.timeout_seconds), headers={"Accept": "image/*"})
-                    if rr.status_code == 200 and rr.content:
-                        out["cover_bytes"] = rr.content
+                    data = self._download_bytes_limited(caa_url, timeout=max(15, self.cfg.timeout_seconds), max_bytes=5 * 1024 * 1024, headers={"Accept": "image/*"})
+                    if data:
+                        out["cover_bytes"] = data
                 except Exception:
                     pass
 
         return {k: v for k, v in out.items() if v not in (None, "")}
 
     def _from_rateyourmusic(self, artist: str, title: str) -> str:
-        """RateYourMusic is experimental: no official public API.
-        We do not scrape by default. If enabled, this method currently acts as a safe stub.
+        """Resolve genre via RateYourMusic (HTML parsing).
+
+        Important
+        ---------
+        - RateYourMusic has no official public API.
+        - This implementation performs best-effort HTML parsing and may break if RYM
+          changes markup.
+        - A cookie is required because anonymous browsing is often rate-limited and
+          occasionally blocked.
         """
+
         cookie = (self.cfg.rateyourmusic_cookie or "").strip()
         if not cookie:
-            self.log("RYM: SKIP (no cookie/token configured)")
+            self.log("RYM: SKIP (cookie ontbreekt)")
             return "Unknown"
-        # Best-effort placeholder (safe): do not scrape content.
-        self.log("RYM: SKIP (experimental source not implemented)")
-        return "Unknown"
+
+        try:
+            url = self._rym_search_release_url(artist, title, cookie=cookie)
+            if not url:
+                self.log(f"RYM: MISS search artist={artist} title={title}")
+                return "Unknown"
+
+            genres = self._rym_extract_genres(url, cookie=cookie)
+            if not genres:
+                self.log(f"RYM: MISS (no genres) url={url}")
+                return "Unknown"
+
+            g0 = genres[0]
+            self.log(f"RYM: OK {g0} url={url}")
+            return g0
+        except Exception as e:
+            self.log(f"RYM: FAIL ({e})")
+            return "Unknown"
+
+    def _rym_headers(self, cookie: str) -> Dict[str, str]:
+        return {
+            "User-Agent": self.cfg.user_agent,
+            "Cookie": cookie,
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9,nl;q=0.8",
+        }
+
+    def _rym_search_release_url(self, artist: str, title: str, *, cookie: str) -> Optional[str]:
+        """Find a candidate release page URL on RYM.
+
+        We avoid deep scraping: one search page, then one release page.
+        """
+        term = f"{artist} {title}".strip()
+        if not term:
+            return None
+
+        # Per-run cache
+        ck = f"rym_search||{term.lower()}"
+        if ck in self._meta_cache:
+            u = (self._meta_cache.get(ck) or {}).get("url")
+            return str(u) if u else None
+
+        # RYM search endpoint (no official contract; this is best-effort)
+        url = "https://rateyourmusic.com/search"
+        params = {
+            "searchterm": term,
+            # Prefer releases; other values observed historically are: a (artists), l (releases)
+            "searchtype": "l",
+        }
+
+        self._pacing()
+        r = self.http.get(url, params=params, headers=self._rym_headers(cookie), timeout=max(20, self.cfg.timeout_seconds))
+        if r.status_code != 200:
+            self.log(f"RYM search: FAIL ({r.status_code}) term={term}")
+            return None
+
+        html = r.text or ""
+        if not html:
+            return None
+
+        # Heuristic: pick the first /release/ link.
+        import re
+
+        m = re.search(r'href="(/release/[^\"]+)"', html)
+        if not m:
+            # Fallback: sometimes links are single-quoted
+            m = re.search(r"href='(/release/[^']+)'", html)
+        if not m:
+            return None
+
+        rel = m.group(1)
+        full = "https://rateyourmusic.com" + rel
+        self._meta_cache[ck] = {"url": full}
+        return full
+
+    def _rym_extract_genres(self, release_url: str, *, cookie: str) -> list[str]:
+        """Extract a list of genres from a RYM release page."""
+        self._pacing()
+        r = self.http.get(release_url, headers=self._rym_headers(cookie), timeout=max(20, self.cfg.timeout_seconds))
+        if r.status_code != 200:
+            self.log(f"RYM release: FAIL ({r.status_code}) url={release_url}")
+            return []
+
+        html = r.text or ""
+        if not html:
+            return []
+
+        # Parse anchors that link to /genre/...
+        from html.parser import HTMLParser
+        from urllib.parse import unquote
+
+        class _GenreLinkParser(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self._in_genre_a = False
+                self._buf: list[str] = []
+                self.genres: list[str] = []
+
+            def handle_starttag(self, tag, attrs):
+                if tag.lower() != "a":
+                    return
+                href = ""
+                for k, v in attrs:
+                    if k.lower() == "href":
+                        href = v or ""
+                        break
+                if "/genre/" in href:
+                    self._in_genre_a = True
+                    self._buf = []
+
+            def handle_endtag(self, tag):
+                if tag.lower() == "a" and self._in_genre_a:
+                    txt = "".join(self._buf).strip()
+                    if txt:
+                        self.genres.append(txt)
+                    self._in_genre_a = False
+                    self._buf = []
+
+            def handle_data(self, data):
+                if self._in_genre_a and data:
+                    self._buf.append(data)
+
+        p = _GenreLinkParser()
+        p.feed(html)
+
+        # Deduplicate while keeping order
+        out: list[str] = []
+        seen = set()
+        for g in p.genres:
+            g = unquote(g).strip()
+            if not g:
+                continue
+            ng = normalize_genre(g)
+            if ng in ("Unknown", "Other"):
+                continue
+            key = ng.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(g)
+
+        # If anchor text parsing fails, fall back to URL-based extraction.
+        if not out:
+            import re
+            candidates = re.findall(r"/genre/([^/\"']+)", html)
+            for c in candidates[:12]:
+                g = unquote(c).replace("_", " ").strip()
+                if not g:
+                    continue
+                ng = normalize_genre(g)
+                if ng in ("Unknown", "Other"):
+                    continue
+                key = ng.lower()
+                if key in seen:
+                    continue
+                seen.add(key)
+                out.append(g)
+
+        return out
 
 # -----------------------------
 # Worker thread

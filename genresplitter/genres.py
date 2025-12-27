@@ -101,9 +101,109 @@ GENRE_SIMPLIFY: Dict[str, str] = {
     "rap": "Rap",
     "rnb": "R&B",
     "ska": "Ska",
+
+    # --- Dutch "piratenmuziek" / "geheime zender" culture ---
+    # Keep these explicit aliases narrow; broader classification is handled by is_piratenmuziek().
+    "piratenmuziek": "Piratenmuziek",
+    "piraten hits": "Piratenmuziek",
+    "piratenhits": "Piratenmuziek",
+    "piratenzender": "Piratenmuziek",
+    "piraten zender": "Piratenmuziek",
+    "geheime zender": "Piratenmuziek",
 }
 
-CORE_GENRES = {"Acid Jazz", "Alternative Rock", "Ambient", "Black Metal", "Blues", "Children", "Christmas", "Classic Rock", "Classical", "Country", "Dance-Pop", "Death Metal", "Disco", "Doom Metal", "Drum & Bass", "Dub", "Electronic", "Electropop", "Folk", "Funk", "Garage Rock", "Grunge", "Hard Rock", "Hardcore Punk", "Heavy Metal", "Hip-Hop", "House", "Indie Rock", "Jazz", "Latin", "Metal", "Metalcore", "Nederpop", "New Wave", "Nu Metal", "Other", "Pop", "Pop-Punk", "Pop-Rock", "Post-Grunge", "Post-Punk", "Post-Rock", "Progressive Rock", "Punk-Rock", "R&B", "Rap", "Reggae", "Rock", "Ska", "Ska-Punk", "Soul", "Soundtrack", "Spoken", "Synthpop", "Techno", "Thrash Metal", "Trance", "Trap", "Unknown", "World"}
+CORE_GENRES = {"Acid Jazz", "Alternative Rock", "Ambient", "Black Metal", "Blues", "Children", "Christmas", "Classic Rock", "Classical", "Country", "Dance-Pop", "Death Metal", "Disco", "Doom Metal", "Drum & Bass", "Dub", "Electronic", "Electropop", "Folk", "Funk", "Garage Rock", "Grunge", "Hard Rock", "Hardcore Punk", "Heavy Metal", "Hip-Hop", "House", "Indie Rock", "Jazz", "Latin", "Metal", "Metalcore", "Nederpop", "New Wave", "Nu Metal", "Other", "Piratenmuziek", "Pop", "Pop-Punk", "Pop-Rock", "Post-Grunge", "Post-Punk", "Post-Rock", "Progressive Rock", "Punk-Rock", "R&B", "Rap", "Reggae", "Rock", "Ska", "Ska-Punk", "Soul", "Soundtrack", "Spoken", "Synthpop", "Techno", "Thrash Metal", "Trance", "Trap", "Unknown", "World"}
+
+
+# --- Piratenmuziek classification ---
+# This classification is intended to align with "geheime zender" / pirate radio programming in NL:
+# largely Nederlandstalig levenslied/volks, (Duitse) schlager and related compilations ("piratenhits").
+
+PIRATEN_STRONG_KEYWORDS = {
+    "piratenmuziek",
+    "piratenhits",
+    "piraten hits",
+    "piraat",
+    "piraten",
+    "piratenzender",
+    "geheime zender",
+    "piratenmedley",
+    "piraten medley",
+}
+
+PIRATEN_CONTEXT_KEYWORDS = {
+    "nederlandstalig",
+    "hollands",
+    "volksmuziek",
+    "levenslied",
+    "smartlap",
+    "schlager",
+    "duitse schlager",
+    "feest",
+    "party",
+    "polka",
+}
+
+# A pragmatic "seed" artist set based on common pirate-hit compilations and pirate charts.
+PIRATEN_SEED_ARTISTS = {
+    "jannes",
+    "frans bauer",
+    "henk wijngaard",
+    "marianne weber",
+    "stef ekkel",
+    "koos alberts",
+    "rene riva",
+    "grad damen",
+    "thomas berge",
+    "dries roelvink",
+    "monique smit",
+    "rene schuurmans",
+    "helemaal hollands",
+    "albert west",
+    "mooi wark",
+    "frank van etten",
+    "django wagner",
+    "mart hoogkamer",
+}
+
+def _norm_text(s: str) -> str:
+    s = (s or "").lower()
+    s = re.sub(r"[\u2019\u2018\u201c\u201d]", "'", s)
+    s = re.sub(r"[^a-z0-9\s]", " ", s)
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
+
+def piratenmuziek_score(artist: str, title: str, raw_genre: Optional[str] = None) -> int:
+    """Return a score indicating likelihood of NL 'piratenmuziek' (geheime zender style)."""
+    a = _norm_text(artist)
+    t = _norm_text(title)
+    g = _norm_text(raw_genre or "")
+    text = f"{a} {t} {g}".strip()
+
+    score = 0
+
+    # Strong direct indicators
+    if any(kw in text for kw in PIRATEN_STRONG_KEYWORDS):
+        score += 6
+
+    # Seed artist list (high precision)
+    for sa in PIRATEN_SEED_ARTISTS:
+        if sa and sa in a:
+            score += 6
+            break
+
+    # Contextual indicators
+    if any(kw in text for kw in PIRATEN_CONTEXT_KEYWORDS):
+        score += 2
+
+    # Small bump if it's explicitly labeled as (Duitse) schlager + NL context
+    if ("schlager" in text or "volks" in text) and ("nederland" in text or "hollands" in text):
+        score += 1
+
+    return score
+
+def is_piratenmuziek(artist: str, title: str, raw_genre: Optional[str] = None, threshold: int = 6) -> bool:
+    return piratenmuziek_score(artist, title, raw_genre) >= int(threshold)
 
 
 
@@ -148,25 +248,145 @@ def genre_candidates(raw: str) -> list[str]:
     return out
 
 def normalize_genre(g: str) -> str:
-    g = (g or "").strip()
+    """Normalize arbitrary genre strings to a supported top-level genre.
+
+    Rules (kept intact; extended for new top-level folders):
+    - Suffix dominance: the last genre term determines the parent genre (e.g. synthpop -> Pop).
+    - Overrides (dominant anywhere in the string):
+        - any *metal* -> Metal
+        - "hard rock" -> Rock
+    - Special cases:
+        - "folk pop" -> Pop
+        - "pop punk" -> Punk
+        - "punk rock" -> Punk
+        - "alternative rock" -> Alternative
+        - "indie rock" -> Indie
+        - "k-pop"/"kpop" -> K-Pop
+        - "hip-hop"/"hip hop"/"hiphop" -> Hip-Hop
+    - New top-level folders (dominant / token-based):
+        - trance -> Trance
+        - house -> House
+        - edm -> EDM
+        - club -> Club
+        - hardcore -> Hardcore
+    - Return "Other" only as a final fallback when nothing matches.
+    """
     if not g:
-        return "Unknown"
-    candidates = genre_candidates(g)
-    if not candidates:
-        return "Unknown"
 
-    christmas_variants = ["christmas","xmas","noel","noël","kerst","kerstmis","navidad","weihnachten","natale","frozen christmas"]
-    for cand in candidates:
-        if any(v in cand for v in christmas_variants):
-            return "Christmas"
+        # HOTFIX v2.9.3.26 token_fallback:
+        # Some APIs return partial/fragmented tags (e.g. "indie", "songwriter"). Treat these as safe fallbacks.
+        # Do NOT map country/language fragments like "dutch" to a genre.
+        if 'tokens' in locals():
+            token_set = set(tokens)
+            if "indie" in token_set:
+                return "Indie"
+            if "folk" in token_set:
+                return "Folk"
+            if "songwriter" in token_set or "songwriters" in token_set:
+                return "Pop"
 
-    for cand in candidates:
-        low = cand.lower()
-        spaced, compact = _norm_match(low)
-        for orig_kw, kw_sp, kw_cp in _GENRE_KEYS_NORM:
-            if orig_kw in low or kw_sp in spaced or kw_cp in compact:
-                return GENRE_SIMPLIFY[orig_kw]
+        return "Other"
+    s = str(g).strip().lower()
+    if not s:
+        return "Other"
+
+    # Normalize separators
+    s = s.replace("_", " ").replace("/", " ").replace("-", " ").replace(".", " ")
+    s = re.sub(r"\s+", " ", s).strip()
+
+    # Exact special cases / aliases
+    special_cases = {
+        "folk pop": "Pop",
+        "pop punk": "Punk",
+        "punk rock": "Punk",
+        "alternative rock": "Alternative",
+        "indie rock": "Indie",
+        "k pop": "K-Pop",
+        "kpop": "K-Pop",
+        "hip hop": "Hip-Hop",
+        "hiphop": "Hip-Hop",
+            "indie pop": "Pop",
+        "dutch indie": "Indie",
+        "indie folk": "Folk",
+        "singer songwriter": "Pop",
+        "singer songwriters": "Pop",
+        "singer-songwriter": "Pop",
+        "singer/songwriter": "Pop",
+}
+    if s in special_cases:
+        return special_cases[s]
+
+    # Dominant overrides
+    if "metal" in s:
+        return "Metal"
+    if "hard rock" in s:
+        return "Rock"
+
+    # New top-level electronic folders:
+    # - Treat as top-level if present as a token anywhere, or if last token matches.
+    tokens = [t for t in s.split(" ") if t]
+    token_set = set(tokens)
+
+    if "edm" in token_set:
+        return "EDM"
+    # 'club' often appears as "club mix"/"club edit"
+    if "club" in token_set:
+        return "Club"
+    # hardcore should win over house/trance if both present (rare but can happen)
+    if "hardcore" in token_set:
+        return "Hardcore"
+
+    last = tokens[-1] if tokens else s
+    if last == "trance" or last.endswith("trance"):
+        return "Trance"
+    if last == "house" or last.endswith("house"):
+        return "House"
+
+    # Suffix dominance for remaining top-level genres
+    def _suffix_pick(word: str):
+        suffix_map = [
+            ("classical", "Classical"),
+            ("country", "Country"),
+            ("reggae", "Reggae"),
+            ("latin", "Latin"),
+            ("blues", "Blues"),
+            ("jazz", "Jazz"),
+            ("folk", "Folk"),
+            ("punk", "Punk"),
+            ("rock", "Rock"),
+            ("dance", "Dance"),
+            ("indie", "Indie"),
+            ("alternative", "Alternative"),
+            ("rap", "Rap"),
+            ("pop", "Pop"),
+        ]
+        for suf, out in suffix_map:
+            if word == suf or word.endswith(suf):
+                return out
+        return None
+
+    picked = _suffix_pick(last)
+    if picked:
+        return picked
+
+    # GENRE_MAP synonyms (final)
+    try:
+        if "GENRE_MAP" in globals() and isinstance(GENRE_MAP, dict):
+            for top, syns in GENRE_MAP.items():
+                try:
+                    if s == str(top).strip().lower():
+                        return str(top)
+                    if isinstance(syns, (set, list, tuple)):
+                        for syn in syns:
+                            if s == str(syn).strip().lower():
+                                return str(top)
+                except Exception:
+                    continue
+    except Exception:
+        pass
+
     return "Other"
+
 
 def is_christmas_track(artist: str, title: str, genre: Optional[str]) -> bool:
     if genre and normalize_genre(genre) == "Christmas":
@@ -181,6 +401,9 @@ def is_christmas_track(artist: str, title: str, genre: Optional[str]) -> bool:
 
 def guess_genre_from_keywords(artist: str, title: str) -> Optional[str]:
     text = f"{artist} {title}".lower()
+    # Piratenmuziek (geheime zender) heuristic
+    if is_piratenmuziek(artist, title, raw_genre=text, threshold=6):
+        return "Piratenmuziek"
     for kw in ["christmas","xmas","merry christmas","jingle bells","we wish you","noel","noël","kerst","kerstmis","navidad","weihnachten","natale","white christmas","silent night","santa claus"]:
         if kw in text:
             return "Christmas"
