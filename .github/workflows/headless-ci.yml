@@ -1,0 +1,49 @@
+name: Headless GenreSplitter validation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'batch_sort.py'
+      - 'genresplitter/**'
+      - 'requirements-headless.txt'
+      - '.github/workflows/headless-ci.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - name: Install headless dependencies
+        run: python -m pip install -r requirements-headless.txt
+      - name: Compile headless sources
+        run: python -m py_compile batch_sort.py genresplitter/process_resolver.py genresplitter/api_resolver.py genresplitter/api_subprocess_worker.py genresplitter/fs_utils.py genresplitter/genres.py
+      - name: Validate headless contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python batch_sort.py --help >/dev/null
+          python - <<'PY'
+          from batch_sort import build_api_config
+          from genresplitter.process_resolver import ProcessGenreResolver
+
+          cfg = build_api_config({
+              'lastfm_api_key': 'x',
+              'enable_spotify': False,
+              'api_timeout_seconds': 17,
+              'api_process_timeout_sec': 41,
+          })
+          assert cfg.lastfm_key == 'x'
+          assert cfg.timeout_seconds == 17
+          assert cfg.enable_spotify is False
+          assert hasattr(ProcessGenreResolver, 'save_cache')
+          assert ProcessGenreResolver.save_cache.__qualname__.startswith('ProcessGenreResolver.')
+          print('headless contract: OK')
+          PY
